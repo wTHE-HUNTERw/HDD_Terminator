@@ -392,3 +392,272 @@ class ATACommandExecutor:
                 is_lba48=is_lba48
             )
         return res
+
+    def read_smart_thresholds(self) -> dict:
+        """
+        Executes ATA SMART READ ATTRIBUTE THRESHOLDS (0xB0, Features 0xD1).
+        Returns threshold values for each SMART attribute ID.
+        """
+        buf = bytearray(512)
+        with self.controller as spt:
+            res = spt.execute_sat_ata_command(
+                command=ATA_SMART,
+                features=SMART_READ_ATTRIBUTES_THRESHOLD,
+                sector_count=1,
+                lba=(0xC2 << 16) | (0x4F << 8),
+                device=0,
+                data_buffer=buf,
+                data_direction="in",
+                is_lba48=False
+            )
+
+        raw_data = res.get("data")
+        if not raw_data or len(raw_data) < 512:
+            return {"success": False, "error": "No se pudo leer la tabla de umbrales SMART.", "raw_result": res}
+
+        thresholds = {}
+        for i in range(30):
+            offset = 2 + (i * 12)
+            attr_id = raw_data[offset]
+            if attr_id == 0:
+                continue
+            threshold_val = raw_data[offset + 1]
+            thresholds[attr_id] = threshold_val
+
+        return {
+            "success": True,
+            "thresholds": thresholds,
+            "raw_data": raw_data,
+            "raw_result": res
+        }
+
+    def read_smart_selftest_log(self) -> dict:
+        """
+        Reads SMART Self-Test Results Log (Log Address 0x06).
+        Parses the 21 self-test entries showing test type, status, lifetime hours, and failing LBA.
+        """
+        log_res = self.smart_read_log(log_address=0x06, page_count=1)
+        raw_data = log_res.get("data")
+        if not raw_data or len(raw_data) < 512:
+            return {"success": False, "error": "No se pudo leer el log de Self-Test (0x06).", "raw_result": log_res}
+
+        # Parse self-test log structure
+        # Byte 0: Self-test log data structure revision (should be 0x01)
+        revision = raw_data[0]
+        # Byte 1: Self-test log index (pointer to most recent entry, 1-based, 0 = no entries)
+        log_index = raw_data[1]
+
+        entries = []
+        # 21 entries of 24 bytes each, starting at offset 2
+        for i in range(21):
+            offset = 2 + (i * 24)
+            if offset + 24 > len(raw_data):
+                break
+
+            test_num = raw_data[offset]  # Test number (descriptor index)
+            status_byte = raw_data[offset + 1]
+            test_type_nibble = (status_byte >> 4) & 0x0F
+            test_status_nibble = status_byte & 0x0F
+
+            # Remaining lifetime hours when test was run
+            lifetime_hours = struct.unpack_from("<H", raw_data, offset + 2)[0]
+            # Failing LBA (if applicable)
+            failing_lba = struct.unpack_from("<I", raw_data, offset + 4)[0]
+
+            if test_num == 0 and status_byte == 0 and lifetime_hours == 0:
+                continue  # Empty entry
+
+            # Decode test type
+            test_type_names = {
+                0x00: "Offline",
+                0x01: "Short (Offline)",
+                0x02: "Extended (Offline)",
+                0x03: "Conveyance",
+                0x04: "Selective",
+                0x81: "Short (Captive)",
+                0x82: "Extended (Captive)",
+            }
+            test_type_str = test_type_names.get(test_type_nibble, f"Desconocido (0x{test_type_nibble:02X})")
+
+            # Decode test status
+            status_names = {
+                0x00: "Completado sin errores",
+                0x01: "Abortado por el host",
+                0x02: "Interrumpido por reset",
+                0x03: "Error fatal / No se pudo completar",
+                0x04: "Tipo de test desconocido",
+                0x05: "Error eléctrico",
+                0x06: "Error de servo",
+                0x07: "Error de lectura",
+                0x08: "Error por daño manejado",
+                0x0F: "En progreso",
+            }
+            status_str = status_names.get(test_status_nibble, f"Desconocido (0x{test_status_nibble:X})")
+
+            entries.append({
+                "test_num": test_num,
+                "test_type": test_type_str,
+                "status": status_str,
+                "status_code": test_status_nibble,
+                "lifetime_hours": lifetime_hours,
+                "failing_lba": failing_lba if test_status_nibble not in (0x00, 0x01, 0x0F) else None,
+            })
+
+        return {
+            "success": True,
+            "revision": revision,
+            "log_index": log_index,
+            "entries": entries,
+            "raw_data": raw_data,
+            "raw_result": log_res
+        }
+
+    def read_native_max_address(self) -> dict:
+        """
+        Executes ATA READ NATIVE MAX ADDRESS (0xF8).
+        Returns the true native capacity of the drive, which may differ from the
+        user-accessible capacity if a Host Protected Area (HPA) or DCO is active.
+        """
+        with self.controller as spt:
+            res = spt.execute_sat_ata_command(
+                command=ATA_READ_NATIVE_MAX_ADDRESS,
+                features=0,
+                sector_count=0,
+                lba=0,
+                device=0x40,  # LBA mode
+                data_direction="none"
+            )
+
+        regs = res.get("ata_registers", {})
+        native_lba = regs.get("lba", 0)
+        native_sectors = native_lba + 1 if native_lba > 0 else 0
+        native_gb = (native_sectors * 512) / (1024 ** 3) if native_sectors > 0 else 0
+
+        return {
+            "success": res.get("success", False),
+            "native_max_lba": native_lba,
+            "native_sectors": native_sectors,
+            "native_capacity_gb": native_gb,
+            "registers": regs,
+            "raw_result": res
+        }
+
+    def write_sector(self, lba: int, data: bytes) -> dict:
+        """
+        Writes 1 sector (512 bytes) to the given LBA address.
+        WARNING: This is a destructive operation that overwrites data on disk.
+        
+        :param lba: Target LBA address
+        :param data: Exactly 512 bytes to write
+        """
+        if len(data) != 512:
+            return {"success": False, "error": f"El buffer de escritura debe ser de 512 bytes, se proporcionaron {len(data)}."}
+
+        buf = bytearray(data)
+        with self.controller as spt:
+            res = spt.execute_sat_ata_command(
+                command=ATA_WRITE_SECTORS_EXT if lba > 0x0FFFFFFF else ATA_WRITE_SECTORS,
+                features=0,
+                sector_count=1,
+                lba=lba,
+                device=0x40 if lba > 0x0FFFFFFF else 0x00,
+                data_buffer=buf,
+                data_direction="out",
+                is_lba48=(lba > 0x0FFFFFFF)
+            )
+        return {
+            "success": res.get("success", False),
+            "lba": lba,
+            "raw_result": res
+        }
+
+    def check_power_mode(self) -> dict:
+        """
+        Executes ATA CHECK POWER MODE (0xE5).
+        Returns the current power mode of the drive via the Sector Count register.
+        Values: 0x00 = Standby, 0x40 = NV Cache Spindown, 0x41 = NV Cache Spinup,
+                0x80 = Idle, 0xFF = Active/Idle.
+        """
+        with self.controller as spt:
+            res = spt.execute_sat_ata_command(
+                command=ATA_CHECK_POWER_MODE,
+                features=0,
+                sector_count=0,
+                lba=0,
+                device=0,
+                data_direction="none"
+            )
+
+        regs = res.get("ata_registers", {})
+        sc = regs.get("sector_count", 0)
+        mode_map = {
+            0x00: "Standby",
+            0x40: "NV Cache Spindown",
+            0x41: "NV Cache Spinup",
+            0x80: "Idle",
+            0xFF: "Active / Idle",
+        }
+        mode_str = mode_map.get(sc, f"Desconocido (0x{sc:02X})")
+
+        return {
+            "success": res.get("success", False),
+            "power_mode": mode_str,
+            "sector_count_raw": sc,
+            "registers": regs,
+            "raw_result": res
+        }
+
+    def export_smart_report(self) -> dict:
+        """
+        Generates a comprehensive SMART diagnostic report combining:
+        - IDENTIFY data
+        - SMART attributes with thresholds
+        - SMART health status
+        - Self-test history
+        Returns a dict with all data suitable for CSV/JSON/TXT export.
+        """
+        report = {"success": True, "sections": {}}
+
+        # 1. IDENTIFY
+        try:
+            ident = self.identify_device()
+            report["sections"]["identify"] = ident
+        except Exception as e:
+            report["sections"]["identify"] = {"success": False, "error": str(e)}
+
+        # 2. SMART Attributes
+        try:
+            smart = self.read_smart_data()
+            report["sections"]["smart_attributes"] = smart
+        except Exception as e:
+            report["sections"]["smart_attributes"] = {"success": False, "error": str(e)}
+
+        # 3. SMART Thresholds
+        try:
+            thresh = self.read_smart_thresholds()
+            report["sections"]["smart_thresholds"] = thresh
+        except Exception as e:
+            report["sections"]["smart_thresholds"] = {"success": False, "error": str(e)}
+
+        # 4. SMART Status
+        try:
+            status = self.check_smart_status()
+            report["sections"]["smart_status"] = status
+        except Exception as e:
+            report["sections"]["smart_status"] = {"success": False, "error": str(e)}
+
+        # 5. Self-Test Log
+        try:
+            selftest = self.read_smart_selftest_log()
+            report["sections"]["selftest_log"] = selftest
+        except Exception as e:
+            report["sections"]["selftest_log"] = {"success": False, "error": str(e)}
+
+        # 6. Power Mode
+        try:
+            power = self.check_power_mode()
+            report["sections"]["power_mode"] = power
+        except Exception as e:
+            report["sections"]["power_mode"] = {"success": False, "error": str(e)}
+
+        return report

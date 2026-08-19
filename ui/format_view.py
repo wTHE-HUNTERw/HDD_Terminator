@@ -58,6 +58,8 @@ class FormatViewFrame(ctk.CTkFrame):
             values=[
                 "Zero-Fill (Llenado de Ceros)",
                 "Random Pattern (Sobreescritura Aleatoria)",
+                "DoD 5220.22-M (3 Pasadas Certificadas)",
+                "Gutmann (35 Pasadas Máxima Seguridad)",
                 "Surface Read Scan (Escaneo sin borrar)",
             ]
         )
@@ -67,8 +69,17 @@ class FormatViewFrame(ctk.CTkFrame):
         ctk.CTkLabel(cfg_panel, text="Tamaño de Bloque:", font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=1, padx=10, pady=(6, 2), sticky="w")
         self.combo_block = ctk.CTkOptionMenu(
             cfg_panel,
-            values=["256 Sectores (128 KB)", "512 Sectores (256 KB)", "1024 Sectores (512 KB)", "2048 Sectores (1 MB)"]
+            values=[
+                "Automático (Recomendado)",
+                "128 Sectores (64 KB)",
+                "256 Sectores (128 KB)",
+                "512 Sectores (256 KB)",
+                "1024 Sectores (512 KB)",
+                "2048 Sectores (1 MB)",
+                "4096 Sectores (2 MB)"
+            ]
         )
+        self.combo_block.set("Automático (Recomendado)")
         self.combo_block.grid(row=1, column=1, padx=10, pady=(0, 8), sticky="ew")
 
         # Start LBA
@@ -243,6 +254,21 @@ class FormatViewFrame(ctk.CTkFrame):
             self.txt_end_lba.delete(0, "end")
             self.txt_end_lba.insert(0, str(total_sec))
 
+    def _calculate_auto_block_size(self) -> int:
+        """Calcula el tamaño de bloque óptimo en sectores según la capacidad del disco."""
+        if not self.selected_drive:
+            return 256
+        size_bytes = self.selected_drive.get("size_bytes", 0)
+        size_gb = size_bytes / (1024 ** 3)
+        if size_gb >= 250:
+            return 2048  # 1 MB
+        elif size_gb >= 64:
+            return 1024  # 512 KB
+        elif size_gb >= 8:
+            return 512   # 256 KB
+        else:
+            return 256   # 128 KB
+
     def _cmd_start_format(self):
         if not self.format_engine:
             return
@@ -266,7 +292,12 @@ class FormatViewFrame(ctk.CTkFrame):
             end_lba = int(self.txt_end_lba.get().strip())
             
             block_str = self.combo_block.get()
-            block_sectors = int(block_str.split(" ")[0])
+            if "Auto" in block_str or "auto" in block_str.lower():
+                block_sectors = self._calculate_auto_block_size()
+                block_kb = (block_sectors * 512) // 1024
+                self._log(f"Tamaño de bloque Automático seleccionado: {block_sectors} sectores ({block_kb} KB)")
+            else:
+                block_sectors = int(block_str.split(" ")[0])
         except ValueError:
             messagebox.showerror("Error", "Los valores de LBA o bloque no son válidos.")
             return
@@ -274,6 +305,10 @@ class FormatViewFrame(ctk.CTkFrame):
         mode_code = "zero"
         if "Random" in mode_str:
             mode_code = "random"
+        elif "DoD" in mode_str:
+            mode_code = "dod"
+        elif "Gutmann" in mode_str:
+            mode_code = "gutmann"
         elif "Scan" in mode_str:
             mode_code = "verify_read"
 

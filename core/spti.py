@@ -245,16 +245,89 @@ class SPTIController:
         scsi_status = sptwb.sptd.ScsiStatus
 
         sense_data = bytes(sptwb.SenseData)
+        sense_key, asc, ascq = self._parse_scsi_sense(sense_data)
         ata_return_registers = self._parse_sat_sense_data(sense_data)
 
+        ioctl_ok = bool(success) and last_error == 0
+        command_ok, error_hint = self._evaluate_command_result(
+            ioctl_ok=ioctl_ok,
+            scsi_status=scsi_status,
+            sense_key=sense_key,
+            asc=asc,
+            ata_registers=ata_return_registers
+        )
+
         return {
-            "success": bool(success),
+            "success": command_ok,
+            "ioctl_ok": ioctl_ok,
             "win32_error": last_error,
             "scsi_status": scsi_status,
+            "sense_key": sense_key,
+            "asc": asc,
+            "ascq": ascq,
             "sense_data": sense_data,
             "ata_registers": ata_return_registers,
+            "command_ok": command_ok,
+            "error_hint": error_hint,
             "data": bytes(data_buffer) if data_buffer is not None else None
         }
+
+    @staticmethod
+    def _parse_scsi_sense(sense: bytes) -> tuple:
+        """
+        Extracts (sense_key, asc, ascq) from SCSI sense data.
+        Supports descriptor format (0x72/0x73) and fixed format (0x70/0x71).
+        """
+        if len(sense) < 3:
+            return (0xFF, 0xFF, 0xFF)
+        response_code = sense[0] & 0x7F
+        if response_code in (0x72, 0x73, 0x70, 0x71):
+            if len(sense) < 14:
+                return (sense[2] & 0x0F, 0xFF, 0xFF)
+            return (sense[2] & 0x0F, sense[12], sense[13])
+        return (sense[2] & 0x0F, 0xFF, 0xFF)
+
+    @staticmethod
+    def _evaluate_command_result(
+        ioctl_ok: bool,
+        scsi_status: int,
+        sense_key: int,
+        asc: int,
+        ata_registers: dict
+    ) -> tuple:
+        """
+        Determines whether the ATA command REALLY completed successfully and
+        returns a human-readable hint when it did not.
+
+        With CK_COND set, SAT always termininates with CHECK CONDITION even on
+        success (RECOVERED ERROR / ATA PASS-THROUGH INFORMATION AVAILABLE), so
+        the SCSI status alone is NOT a valid success indicator. The truth is in
+        the ATA Status Return Descriptor: bit 0 (ERR) of the ATA status register
+        and the ATA error register.
+        """
+        error_hint = None
+        err_reg = ata_registers.get("error", 0)
+        stat_reg = ata_registers.get("status", 0)
+
+        if not ioctl_ok:
+            return (False, "El IOCTL falló a nivel de sistema. Verifica permisos de Administrador y que el disco no esté en uso.")
+        if ata_registers.get("has_descriptor"):
+            if (stat_reg & 0x01) == 0 and err_reg == 0:
+                return (True, None)
+            if err_reg & 0x04:
+                return (False, "El disco ABORTÓ el comando (Error ATA = ABRT): este comando no está soportado por el firmware del disco o requiere modo diagnóstico (ej. terminal TTL/F3).")
+            return (False, f"Error ATA reportado por el disco: Status=0x{stat_reg:02X} Error=0x{err_reg:02X}.")
+        if scsi_status == 0x00:
+            return (True, None)
+        if scsi_status == 0x02 and sense_key in (0x00, 0x01):
+            return (True, None)  # CK_COND: CHECK CONDITION esperado en éxito (NO SENSE / RECOVERED ERROR)
+        if sense_key == 0x05 and asc == 0x20:
+            return (False, "El puente USB rechazó el opcode (INVALID COMMAND OPERATION CODE): los comandos de fabricante (VSC) suelen estar bloqueados por el bridge USB. Prueba con conexión SATA directa.")
+        if sense_key == 0x0B:
+            return (False, "Comando ABORTADO por el dispositivo o el bridge USB (ABORTED COMMAND).")
+        if sense_key == 0x06:
+            return (False, "El medio/dispositivo indica UNIT ATTENTION: estado no listo o medio cambiado.")
+        return (False, f"SCSI Check Condition sin descriptor ATA: Sense Key=0x{sense_key:02X} ASC=0x{asc:02X}.")
 
     def _parse_sat_sense_data(self, sense: bytes) -> dict:
         """Parses ATA Status Return Descriptor from SCSI Sense Data (Descriptor Format, Response code 0x72/0x73)."""
@@ -263,7 +336,8 @@ class SPTIController:
             "sector_count": 0,
             "lba": 0,
             "device": 0,
-            "status": 0
+            "status": 0,
+            "has_descriptor": False,
         }
         if len(sense) < 8:
             return res
@@ -277,6 +351,7 @@ class SPTIController:
                 if desc_type == 0x09 and desc_len >= 12:  # ATA Status Return Descriptor
                     desc_data = sense[pos + 2: pos + 2 + desc_len]
                     if len(desc_data) >= 12:
+                        res["has_descriptor"] = True
                         res["error"] = desc_data[1]
                         res["sector_count"] = (desc_data[2] << 8) | desc_data[3]
                         lba_low = desc_data[5]

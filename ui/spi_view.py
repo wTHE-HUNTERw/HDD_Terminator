@@ -136,7 +136,28 @@ class SPIEditorViewFrame(ctk.CTkFrame):
         btn_sn = ctk.CTkButton(sn_card, text="Modificar", width=80, command=self._cmd_modify_sn)
         btn_sn.grid(row=1, column=1, padx=(4, 8), pady=(0, 6))
 
-        # 3. CH341A / CH340 Pinout Reference Card
+        # 3. Manual Inline Byte/Hex Writing
+        edit_card = ctk.CTkFrame(scroll_tools, fg_color=("gray85", "gray20"), corner_radius=6)
+        edit_card.pack(fill="x", padx=6, pady=6)
+        edit_card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(edit_card, text="✍️ Modificación Manual de Bytes:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#38bdf8").grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(6, 2))
+
+        ctk.CTkLabel(edit_card, text="Offset (Hex):", font=ctk.CTkFont(size=10)).grid(row=1, column=0, sticky="w", padx=8, pady=(2, 0))
+        self.txt_manual_offset = ctk.CTkEntry(edit_card, placeholder_text="0x000000", width=90)
+        self.txt_manual_offset.grid(row=2, column=0, padx=(8, 4), pady=(0, 6), sticky="w")
+
+        ctk.CTkLabel(edit_card, text="Bytes Hex (ej. 90 90 55 AA):", font=ctk.CTkFont(size=10)).grid(row=1, column=1, sticky="w", padx=4, pady=(2, 0))
+        self.txt_manual_hex = ctk.CTkEntry(edit_card, placeholder_text="90 90 00 00")
+        self.txt_manual_hex.grid(row=2, column=1, padx=4, pady=(0, 6), sticky="ew")
+
+        btn_apply_hex = ctk.CTkButton(edit_card, text="Escribir", width=70, fg_color="#d97706", hover_color="#b45309", command=self._cmd_manual_write_hex)
+        btn_apply_hex.grid(row=2, column=2, padx=(4, 8), pady=(0, 6))
+
+        btn_undo = ctk.CTkButton(edit_card, text="↩️ Deshacer Último Cambio", fg_color="gray30", hover_color="gray40", height=24, command=self._cmd_undo_write)
+        btn_undo.grid(row=3, column=0, columnspan=3, padx=8, pady=(0, 6), sticky="ew")
+
+        # 4. CH341A / CH340 Pinout Reference Card
         pin_card = ctk.CTkFrame(scroll_tools, fg_color=("#1e293b", "#0f172a"), corner_radius=6)
         pin_card.pack(fill="x", padx=6, pady=(10, 6))
         
@@ -155,6 +176,7 @@ class SPIEditorViewFrame(ctk.CTkFrame):
             "⚠️ Nunca alimentes a 5V; el chip 25Q80 se dañará permanentemente."
         )
         ctk.CTkLabel(pin_card, text=pin_text, font=("Consolas", 10), justify="left", text_color="#cbd5e1").pack(anchor="w", padx=8, pady=(0, 8))
+
 
     def _cmd_open_rom(self):
         filepath = filedialog.askopenfilename(
@@ -305,6 +327,42 @@ class SPIEditorViewFrame(ctk.CTkFrame):
         else:
             messagebox.showwarning("Aviso", "No se encontró la cadena de número de serie en formato estándar dentro de la ROM.")
 
+    def _cmd_manual_write_hex(self):
+        if not self.patcher:
+            messagebox.showwarning("Aviso", "Abre primero un archivo de volcado de ROM.")
+            return
+
+        off_str = self.txt_manual_offset.get().strip()
+        hex_str = self.txt_manual_hex.get().strip()
+
+        if not off_str or not hex_str:
+            messagebox.showerror("Error", "Debes ingresar un Offset y la secuencia Hexadecimal.")
+            return
+
+        try:
+            offset = int(off_str, 16) if off_str.lower().startswith("0x") else int(off_str)
+        except ValueError:
+            messagebox.showerror("Error", "Offset no válido.")
+            return
+
+        res = self.patcher.write_hex_string(offset, hex_str)
+        if res.get("success"):
+            self.current_offset = (offset // 16) * 16
+            self._render_hex_view()
+            self._log(f"Escritos {res.get('bytes_written')} bytes en offset 0x{offset:06X}: {hex_str}")
+        else:
+            messagebox.showerror("Error de Escritura", res.get("error", "Error desconocido."))
+
+    def _cmd_undo_write(self):
+        if not self.patcher:
+            return
+        if self.patcher.undo_last_write():
+            self._render_hex_view()
+            self._log("Último cambio revertido exitosamente.")
+        else:
+            messagebox.showinfo("Deshacer", "No hay cambios previos en el historial para deshacer.")
+
     def _log(self, text: str):
         if self.log_callback:
             self.log_callback(f"[SPI-EDITOR] {text}")
+

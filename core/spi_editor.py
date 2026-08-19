@@ -96,3 +96,26 @@ class SPIROMPatcher:
                 count += 1
 
         return {"success": count > 0, "replaced_instances": count}
+
+    def undo_last_write(self) -> bool:
+        """Reverts the last byte write operation."""
+        if not self.history:
+            return False
+        last_op = self.history.pop()
+        offset = last_op["offset"]
+        old_data = last_op["old"]
+        self.data[offset:offset+len(old_data)] = old_data
+        return True
+
+    def write_hex_string(self, offset: int, hex_str: str) -> dict:
+        """Writes a string of hexadecimal bytes at the given offset."""
+        clean_hex = hex_str.replace(" ", "").replace("0x", "").replace(",", "")
+        if len(clean_hex) % 2 != 0:
+            return {"success": False, "error": "Longitud de cadena hexadecimal inválida (debe ser número par de caracteres)."}
+        try:
+            byte_data = bytes.fromhex(clean_hex)
+            self.write_bytes(offset, byte_data)
+            return {"success": True, "bytes_written": len(byte_data), "offset": offset}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
