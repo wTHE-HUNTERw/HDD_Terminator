@@ -66,7 +66,7 @@ class HDDTerminatorApp(ctk.CTk):
 
         subtitle_lbl = ctk.CTkLabel(
             header_frame,
-            text="Herramienta Universal: ATA USB | Formateo en Vivo | Firmware UART | Winbond 25Q80 CH341A",
+            text="Herramienta Universal: ATA USB | Formateo en Vivo | Firmware UART | Editor Universal ROM & EEPROM",
             font=ctk.CTkFont(size=12),
             text_color="gray70"
         )
@@ -95,9 +95,9 @@ class HDDTerminatorApp(ctk.CTk):
         tab_over = self.main_tabs.add("🏠 Centro de Control & Salud")
         tab_ata = self.main_tabs.add("💽 Diagnóstico SMART & ATA")
         tab_format = self.main_tabs.add("🧹 Formateo a Bajo Nivel (En Vivo)")
-        tab_serial = self.main_tabs.add("🔌 Terminal Serial de Firmware")
         tab_vsc = self.main_tabs.add("🧪 Laboratorio por Marcas (VSC)")
-        tab_spi = self.main_tabs.add("💾 Editor SPI Flash (Winbond 25Q80)")
+        tab_spi = self.main_tabs.add("💾 Editor Universal de Memorias (ROM/EEPROM)")
+        tab_serial = self.main_tabs.add("🔌 Terminal Serial de Firmware")
 
         # 1. Overview
         tab_over.grid_columnconfigure(0, weight=1)
@@ -117,23 +117,23 @@ class HDDTerminatorApp(ctk.CTk):
         self.format_view = FormatViewFrame(tab_format, log_callback=self.log_event)
         self.format_view.grid(row=0, column=0, sticky="nsew")
 
-        # 4. Serial
-        tab_serial.grid_columnconfigure(0, weight=1)
-        tab_serial.grid_rowconfigure(0, weight=1)
-        self.serial_view = SerialViewFrame(tab_serial, log_callback=self.log_event)
-        self.serial_view.grid(row=0, column=0, sticky="nsew")
-
-        # 5. VSC
+        # 4. VSC Laboratory
         tab_vsc.grid_columnconfigure(0, weight=1)
         tab_vsc.grid_rowconfigure(0, weight=1)
         self.vsc_view = VSCViewFrame(tab_vsc, log_callback=self.log_event)
         self.vsc_view.grid(row=0, column=0, sticky="nsew")
 
-        # 6. SPI
+        # 5. SPI & Universal Memory Studio
         tab_spi.grid_columnconfigure(0, weight=1)
         tab_spi.grid_rowconfigure(0, weight=1)
         self.spi_view = SPIEditorViewFrame(tab_spi, log_callback=self.log_event)
         self.spi_view.grid(row=0, column=0, sticky="nsew")
+
+        # 6. Serial UART Terminal
+        tab_serial.grid_columnconfigure(0, weight=1)
+        tab_serial.grid_rowconfigure(0, weight=1)
+        self.serial_view = SerialViewFrame(tab_serial, log_callback=self.log_event)
+        self.serial_view.grid(row=0, column=0, sticky="nsew")
 
         # Setup callbacks on overview
         self.overview_view.on_drive_changed_callback = self._on_global_drive_selected
@@ -150,6 +150,7 @@ class HDDTerminatorApp(ctk.CTk):
         self.ata_view.refresh_drives()
         self.format_view.refresh_drives()
         self.vsc_view.refresh_drives()
+        self.spi_view.refresh_drives()
         self.log_event(f"🔄 Lista de unidades físicas actualizada ({len(drives)} detectadas).")
 
     def _on_global_drive_selected(self, drive_dict):
@@ -178,6 +179,14 @@ class HDDTerminatorApp(ctk.CTk):
                 self.vsc_view._on_drive_selected(v)
                 break
 
+        # Sync SPI / Memory Studio view
+        s_vals = self.spi_view.combo_drives.cget("values")
+        for v in s_vals:
+            if path in v:
+                self.spi_view.combo_drives.set(v)
+                self.spi_view._on_drive_selected(v)
+                break
+
         self.log_event(f"💽 Disco seleccionado globalmente: {path} ({drive_dict.get('model')})")
 
     def _on_navigate_tab(self, target: str):
@@ -188,7 +197,7 @@ class HDDTerminatorApp(ctk.CTk):
             "reset": "🧪 Laboratorio por Marcas (VSC)",
             "vsc": "🧪 Laboratorio por Marcas (VSC)",
             "sanitize": "🧪 Laboratorio por Marcas (VSC)",
-            "spi": "💾 Editor SPI Flash (Winbond 25Q80)"
+            "spi": "💾 Editor Universal de Memorias (ROM/EEPROM)"
         }
         tab_name = mapping.get(target)
         if tab_name:

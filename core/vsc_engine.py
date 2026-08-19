@@ -162,6 +162,62 @@ class VSCEngine:
         
         return results
 
+    def wd_read_rom(self, num_sectors: int = 2048) -> dict:
+        """
+        Reads the full SPI Flash ROM directly from the WD drive over SATA/USB via VSC (0xD5).
+        Default 2048 sectors = 1 MB (Winbond/Macronix/GigaDevice).
+        """
+        self.wd_superon_unlock()
+        buf = bytearray(num_sectors * 512)
+        with self.controller as spt:
+            res = spt.execute_sat_ata_command(
+                command=0xD5,  # VSC Read Module/ROM
+                features=min(num_sectors, 256),  # Chunk size
+                sector_count=0x00,  # Module 0x00 / ROM direct
+                lba=0x00,
+                device=0x00,
+                data_buffer=buf,
+                data_direction="in"
+            )
+        res["rom_data"] = buf
+        return res
+
+    def wd_write_rom(self, rom_data: bytearray) -> dict:
+        """
+        Writes and flashes the modified ROM data directly to the WD drive over SATA/USB via VSC (0xD6).
+        """
+        self.wd_superon_unlock()
+        num_sectors = max(1, len(rom_data) // 512)
+        with self.controller as spt:
+            res = spt.execute_sat_ata_command(
+                command=0xD6,  # VSC Write Module/ROM
+                features=min(num_sectors, 256),
+                sector_count=0x00,  # Module 0x00 / ROM direct
+                lba=0x00,
+                device=0x00,
+                data_buffer=rom_data,
+                data_direction="out"
+            )
+        return res
+
+    def wd_backup_module_to_file(self, module_id: int, filepath: str, num_sectors: int = 1) -> dict:
+        """Reads a module and saves it to a backup .bin file."""
+        res = self.wd_read_module(module_id=module_id, num_sectors=num_sectors)
+        if res.get("success") and res.get("data"):
+            with open(filepath, "wb") as f:
+                f.write(res["data"])
+            return {"success": True, "filepath": filepath, "bytes": len(res["data"])}
+        return {"success": False, "error": res.get("error", "Error al leer módulo.")}
+
+    def wd_restore_module_from_file(self, module_id: int, filepath: str) -> dict:
+        """Reads a .bin file and writes it back to the drive module."""
+        if not os.path.exists(filepath):
+            return {"success": False, "error": f"Archivo de backup no encontrado: {filepath}"}
+        with open(filepath, "rb") as f:
+            data = f.read()
+        num_sectors = max(1, len(data) // 512)
+        return self.wd_write_module(module_id=module_id, data=bytearray(data), num_sectors=num_sectors)
+
     # =============================================================
     # SEAGATE VSC (DIRECT ATA — NO SERIAL TERMINAL REQUIRED)
     # =============================================================

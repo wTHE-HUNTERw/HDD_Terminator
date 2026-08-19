@@ -102,19 +102,19 @@ class OverviewViewFrame(ctk.CTkFrame):
             text="🚀 Acciones Rápidas & Tratamiento Recomendado",
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color="#e2e8f0"
-        ).grid(row=2, column=0, columnspan=4, sticky="w", padx=12, pady=(20, 8))
+        ).grid(row=3, column=0, columnspan=4, sticky="w", padx=12, pady=(20, 8))
 
         actions = [
             ("🧹 Formateo a Bajo Nivel", "Limpia y sobreescribe todos los sectores con visualizador en vivo.", "format", "#dc2626"),
             ("📊 Análisis SMART Completo", "Revisa la lista de 30 atributos SMART y umbrales de fallo.", "smart", "#15803d"),
             ("🛠️ Limpiar Sectores / G-List", "Guías y comandos para borrar sectores reasignados por marca.", "reset", "#7c3aed"),
+            ("💾 Modding Universal ROM/EEPROM", "Edita, respalda y flashea volcados de memoria ROM y EEPROM.", "spi", "#d97706"),
             ("🔌 Terminal Serial de Firmware", "Accede a la consola de microcódigo UART (Seagate, WD, Toshiba).", "serial", "#0284c7"),
-            ("💾 Modding SPI (Winbond 25Q80)", "Edita y desbloquea volcados de memoria ROM para CH341A.", "spi", "#d97706"),
             ("⚡ ATA Sanitize & Security", "Purga de bajo nivel mediante microcódigo de controladora.", "sanitize", "#b45309")
         ]
 
         for idx, (title, desc, nav_target, color) in enumerate(actions):
-            r = 3 + (idx // 3)
+            r = 4 + (idx // 3)
             c = (idx % 3)
             # Expand to fill 3-column span nicely
             self._create_action_card(scroll, r, c, title, desc, nav_target, color)

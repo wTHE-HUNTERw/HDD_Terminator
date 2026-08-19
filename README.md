@@ -39,14 +39,21 @@
 - **Samsung VSC**: Acceso a Service Area (`0xDF`) y borrado de logs (`0xE0`).
 - **ATA Sanitize & Enhanced Security Erase**: Borrado por hardware a nivel de microcódigo.
 
-### 5. 💾 Editor de Memoria SPI Flash & Parcheador ROM (Winbond 25Q80 / CH341A)
-- **Editor Hexadecimal Interactivo**: Visualización y edición byte a byte de volcados de memoria ROM (`.bin`, `.rom`, `.dat`).
-- **Buscador Hex & ASCII**: Búsqueda rápida de cadenas, números de serie y firmas de cabezales.
-- **Parcheador de Firmware Automático**:
-  - **Desbloqueo de Terminal Serie Seagate Rosewood / Grenada (Bypass Handshake Lock)**.
-  - **Editor de Número de Serie de Fábrica**.
-- **Guardado y Exportación**: Genera el archivo `.bin` listo para flashear directamente con el programador **CH341A / CH340** (NeoProgrammer / AsProgrammer).
-- **Diagrama de Conexión**: Pinout completo de Winbond 25Q80 a CH341A (3.3V).
+### 5. 💾 Editor Universal de Memorias ROM & EEPROM (SPI / I2C / Microwire)
+- **Compatibilidad Total de Chips**:
+  - **SPI Flash 25xx**: Winbond (W25Q), Macronix (MX25L), GigaDevice (GD25Q), Micron/ST (M25P/N25Q), EON, Spansion, Puya, Boya (64 KB a 32 MB+).
+  - **I2C EEPROM 24Cxx**: 24C01, 24C02, 24C04, 24C08, 24C16, 24C32, 24C64, 24C128, 24C256, 24C512.
+  - **SPI EEPROM 25Cxx / 95Cxx**: 25010 a 25512, M95080, M95160, M95320, M95640, M95128.
+  - **Microwire EEPROM 93Cxx**: 93C46, 93C56, 93C66, 93C76, 93C86.
+- **Editor Hexadecimal Interactivo**: Visualización y edición byte a byte de volcados de memoria ROM (`.bin`, `.rom`, `.dat`, `.hex`).
+- **Buscador Hex & ASCII**: Búsqueda rápida de cadenas, números de serie y firmas de microcódigo.
+- **Parcheadores de Firmware por Marca**:
+  - **Seagate F3**: Desbloqueo Terminal Rosewood (Bypass Handshake) y Selector de Baudrate UART en ROM (115200 / 460800 / 921600).
+  - **Western Digital**: Aislamiento de cabezal dañado (Módulo 0B Head Map) y Reparación automática de Checksums ROYL.
+  - **Universal**: Modificación de Número de Serie y Modelo (Seagate, WD, Toshiba, Hitachi, Samsung).
+- **Herramientas Binarias**: Byte-Swap (16-bit / 32-bit Endianness), Relleno de Rango (0x00/0xFF) y Pad a capacidad estándar de chip.
+- **Integridad y Checksums**: Cálculo en tiempo real de CRC32, MD5, SHA-256, Sum8 y Sum16.
+- **Guías de Pinouts y Diagramas**: Pinouts detallados para CH341A, RT809F/H, TL866II Plus / T48 / T56 con advertencias de voltajes seguros (3.3V vs 1.8V vs 5V).
 
 ---
 
